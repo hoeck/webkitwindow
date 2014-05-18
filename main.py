@@ -1,4 +1,4 @@
-import webkit
+import webkitwindow
 
 
 import datetime
@@ -39,7 +39,7 @@ class ExampleHandler():
     # HTTP
 
     def request(self, req):
-        req.respond(webkit.Message(**rrr()))
+        req.respond(webkitwindow.Message(**rrr()))
 
     # WebSocket
 
@@ -56,7 +56,7 @@ class ExampleHandler():
 
 
 def main():
-    webkit.WebkitWindow.run(ExampleHandler(), "http://foo")
+    webkitwindow.WebkitWindow.run(ExampleHandler(), "http://foo")
 
 if __name__ == '__main__':
     main()

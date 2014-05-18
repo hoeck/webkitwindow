@@ -322,7 +322,7 @@ class WebkitWindow(QtGui.QMainWindow):
     # QNetworkAccessManager. Thus we 'intercept' WebSocket connection
     # attempts by adding our own implementation of the WebSocket
     # interface to the javascript window context of each new frame.
-    websocket_js = pkgutil.get_data('webkit', 'websocket.js')
+    websocket_js = pkgutil.get_data('webkitwindow', 'websocket.js')
 
     def setup_local_websockets_on_frame(self, qwebframe):
         def _load_js(f=qwebframe, js=self.websocket_js, websocket_backend=self.websocket_backend):
