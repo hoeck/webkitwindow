@@ -34,12 +34,35 @@ def rrr():
     </body></html>""" % (datetime.datetime.now(), ','.join(map(str, range(2)))))
 
 
+import threading
+import time
+
+def xxx(req):
+    print "Threaded Response"
+    for x in range(50):
+        time.sleep(0.2)
+        print "foo %s\n" % x
+        req.respond("foo %s %s\n" % ('x'*256, x))
+    req.respond() # close
+
+
 class ExampleHandler():
 
     # HTTP
 
     def request(self, req):
-        req.respond(webkitwindow.Message(**rrr()))
+        if 0:
+            # immediate
+            req.respond(webkitwindow.Message(**rrr()))
+
+        if 1:
+            # streaming
+            req.respond(webkitwindow.Message(status="200",
+                                             status_text="found",
+                                             body=None))
+            t = threading.Thread(target=lambda : xxx(req))
+            t.start()
+            print "thread started"
 
     # WebSocket
 

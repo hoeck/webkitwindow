@@ -2,6 +2,7 @@ import sys
 import os
 import pkgutil
 import Queue
+import StringIO
 
 try:
     from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
@@ -14,7 +15,7 @@ class Message():
     def __init__(self,
                  status=None, status_text=None, # response
                  method=None, url=None, # request
-                 headers={}, body=""):
+                 headers={}, body=None):
         self.status = status
         self.status_text = status_text
 
@@ -30,11 +31,26 @@ class Request():
     def __init__(self, message, fake_reply):
         self.message = message
         self.fake_reply = fake_reply
+        self._streaming = False
 
-    def respond(self, message, close=True):
-        # switch to GUI thread?
-        # TODO: implement partial response  by honoring the close argument
-        self.fake_reply.set_response(message)
+    def respond(self, message=None):
+        """Respond to this request with a Message.
+
+        Set the message body to None to write the response body later
+        by calling this method with a string as the message.
+
+        When message is None, a partial response is finally closed.
+        """
+        if isinstance(message, Message):
+            if message.body is None:
+                self._streaming = True
+            self.fake_reply.fake_response.emit(message)
+        elif message is None:
+            assert self._streaming, "not a streaming response"
+            self.fake_reply.fake_response_close.emit()
+        else:
+            assert self._streaming, "not a streaming response"
+            self.fake_reply.fake_response_write.emit(str(message))
 
 
 class WebSocket():
@@ -71,7 +87,6 @@ class NetworkHandler():
         """Incoming Request.
 
         Use request.respond(id, **data) to respond.
-        TODO: partial responses
         """
         pass
 
@@ -163,53 +178,94 @@ class FakeReply(QtNetwork.QNetworkReply):
     """
     QNetworkReply implementation that returns a given response.
     """
+
+    fake_response       = QtCore.pyqtSignal(object)
+    fake_response_write = QtCore.pyqtSignal(object)
+    fake_response_close = QtCore.pyqtSignal()
+
     def __init__(self, parent, request, operation):
         QtNetwork.QNetworkReply.__init__(self, parent)
+
+        self.fake_response.connect(self._fake_response)
+        self.fake_response_write.connect(self._fake_response_write)
+        self.fake_response_close.connect(self._fake_response_close)
+
+        self._streaming = False
+        self._content = None
+        self._offset = 0
+
         self.setRequest(request)
         self.setUrl(request.url())
         self.setOperation(operation)
         self.open(self.ReadOnly | self.Unbuffered)
 
-    def set_response(self, response):
-        self.content = response.body
-        self.offset = 0
-
-        for k,v in response.headers.items():
-            self.setRawHeader(QtCore.QString(k), QtCore.QString(v))
-
-        if not 'Content-Length' in response.headers:
-            self.setHeader(QtNetwork.QNetworkRequest.ContentLengthHeader, QtCore.QVariant(len(self.content)))
+    @QtCore.pyqtSlot(object)
+    def _fake_response(self, response):
+        assert isinstance(response, Message)
 
         # status
         self.setAttribute(QtNetwork.QNetworkRequest.HttpStatusCodeAttribute, response.status)
         self.setAttribute(QtNetwork.QNetworkRequest.HttpReasonPhraseAttribute, response.status_text)
 
-        QtCore.QTimer.singleShot(0, lambda : self.readyRead.emit())
-        QtCore.QTimer.singleShot(0, lambda : self.finished.emit())
+        # headers
+        for k,v in response.headers.items():
+            self.setRawHeader(QtCore.QString(k), QtCore.QString(v))
+
+        if response.body is not None:
+            self._content = response.body
+            self._offset = 0
+
+            # respond immediately
+            if not 'Content-Length' in response.headers:
+                self.setHeader(QtNetwork.QNetworkRequest.ContentLengthHeader, QtCore.QVariant(len(self._content)))
+
+            QtCore.QTimer.singleShot(0, lambda : self.readyRead.emit())
+            QtCore.QTimer.singleShot(0, lambda : self.finished.emit())
+        else:
+            # streaming response, call fake_response_write and fake_response_close
+            self._streaming = True
+            self._content = StringIO.StringIO()
+
+    @QtCore.pyqtSlot(object)
+    def _fake_response_write(self, response):
+        assert isinstance(response, basestring)
+        assert self._streaming, "not a streaming response"
+        self._content.write(response)
+        self.readyRead.emit()
+
+    @QtCore.pyqtSlot()
+    def _fake_response_close(self):
+        assert self._streaming, "not a streaming response"
+        self.finished.emit()
 
     def abort(self):
         pass
 
     def bytesAvailable(self):
-        # hack:
-        # my version of qtwebkit seems to expect to always the get the
-        # full content length, not the length of the remaining
-        # content!
-        # maybe im misunderstanding the docs or isSequential is not working.
-        return len(self.content)
+        if isinstance(self._content, StringIO.StringIO):
+            c = self._content.getvalue()
+        else:
+            c = self._content
 
-        # normal implementation of this method would be:
-        # return len(self.content) - self.offset
+        avail = long(len(c) - self._offset + super(FakeReply, self).bytesAvailable())
+        return avail
 
     def isSequential(self):
         return True
 
     def readData(self, max_size):
-        if self.offset < len(self.content):
-            end = min(self.offset + max_size, len(self.content))
-            data = self.content[self.offset:end]
-            self.offset = end
+        if isinstance(self._content, StringIO.StringIO):
+            c = self._content.getvalue()
+        else:
+            c = self._content
+
+        if self._offset < len(c):
+            size = min(max_size, len(c)-self._offset)
+            data = c[self._offset:self._offset+size]
+            self._offset += size
             return data
+        else:
+            return None
 
 
 class WebSocketBackend(QtCore.QObject):
