@@ -78,15 +78,23 @@ class WebSocket():
 class NetworkHandler():
     """A Class dealing with requests from the embedded webkit.
 
-    Subclass it to implement your own request/websocket handlers.
+    Subclass or ducktype it to implement your own request/websocket
+    handlers.
     """
+
+    def startup(self, window):
+        """Called after application startup.
+
+        window is the created WebkitWindow instance.
+        """
+        pass
 
     # HTTP
 
     def request(self, request):
         """Incoming Request.
 
-        Use request.respond(id, **data) to respond.
+        Use request.respond(message) to respond.
         """
         pass
 
@@ -209,7 +217,7 @@ class FakeReply(QtNetwork.QNetworkReply):
 
         # headers
         for k,v in response.headers.items():
-            self.setRawHeader(QtCore.QString(k), QtCore.QString(v))
+            self.setRawHeader(QtCore.QByteArray(k), QtCore.QByteArray(v))
 
         if response.body is not None:
             self._content = response.body
@@ -314,18 +322,26 @@ class WebSocketBackend(QtCore.QObject):
 class WebkitWindow(QtGui.QMainWindow):
 
     @classmethod
-    def run(self, handler, url="http://localhost"):
+    def run(self, handler, url="http://localhost", exit=True):
         """Open a window displaying a single webkit instance.
 
         handler must be an object implementing the NetworkHandler
         interface (or deriving from it).
 
         Navigate the webkit to url after opening it.
+
+        If exit is true, sys.exit after closing the window.
         """
         app = QtGui.QApplication(sys.argv)
         win = self(handler, url)
         win.show()
-        sys.exit(app.exec_())
+
+        QtCore.QTimer.singleShot(0, lambda: handler.startup(win))
+
+        if exit:
+            sys.exit(app.exec_())
+        else:
+            return app.exec_()
 
     def __init__(self, network_handler, url=None):
         self.url = url or "http://localhost"
@@ -394,3 +410,6 @@ class WebkitWindow(QtGui.QMainWindow):
 
     def setup_local_websockets(self, qwebpage):
         qwebpage.frameCreated.connect(lambda frame: self.setup_local_websockets_on_frame(frame))
+
+    def run_later(self, f, timeout=None):
+        QtCore.QTimer.singleShot(timeout or 0, f)
