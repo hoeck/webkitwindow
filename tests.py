@@ -36,16 +36,14 @@ def test_load_html():
         def request(self, request):
             try:
                 ntools.assert_is_instance(request, webkitwindow.Request)
-                ntools.assert_equal(request.message.method, 'GET')
-                ntools.assert_equal(request.message.url, test_url)
+                ntools.assert_equal(request.method, 'GET')
+                ntools.assert_equal(request.url, test_url)
 
                 msg = webkitwindow.Message(
-                    status=200,
-                    status_text="found",
                     headers={'Content-Type': 'text/html'},
                     body="<html><head></head><body><h1>test</h1></body></html>"
                 )
-                request.respond(msg)
+                request.respond(200, msg)
             finally:
                 self.done = True
 
@@ -67,7 +65,7 @@ post = function() {
   http.onreadystatechange = function() {
     if (http.readyState == 4) {
       el = document.createElement('h2');
-      el.text = "post test response:" + http.responseText;
+      el.textContent = "post test response:" + http.responseText;
       document.body.appendChild(el);
     }
   };
@@ -103,19 +101,19 @@ document.onreadystatechange = function() {
         def request(self, request):
             try:
                 if request.method == 'GET':
-                    if request.path == '/script.js':
+                    if request.url_path == '/script.js':
                         msg = webkitwindow.Message(headers={'Content-Type': 'text/javascript'},
                                                    body=script)
-                    elif request.path == '/':
+                    elif request.url_path == '/':
                         msg = webkitwindow.Message(headers={'Content-Type': 'text/html'},
                                                    body=html)
                     else:
-                        assert False
+                        assert False, "unexpected path: %s" % (request.url_path, )
                 elif request.method == 'POST':
-                    print "POST", request.message
-                    # TODO
+                    msg = webkitwindow.Message({'Content-Type': 'text/plain'},
+                                               body='sucess!!!')
 
-                request.respond(status=200, msg=msg)
+                request.respond(200, msg)
             finally:
                 self.done = True
 

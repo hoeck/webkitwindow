@@ -3,54 +3,99 @@ import os
 import pkgutil
 import Queue
 import StringIO
+import urlparse
 
 try:
     from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
 except ImportError:
     from PySide import QtCore, QtGui, QtWebKit, QtNetwork
 
+HTTP_STATUS = {
+    200: 'OK',
+    301: 'Moved Permanently',
+    302: 'Found',
+    400: 'Bad Request',
+    404: 'Not Found',
+    406: 'Not Acceptable',
+    500: 'Internal Server Error',
+    503: 'Service Unavailable',
+}
 
 class Message():
 
-    def __init__(self,
-                 status=None, status_text=None, # response
-                 method=None, url=None, # request
-                 headers={}, body=None):
-        self.status = status
-        self.status_text = status_text
+    """An HTTP message."""
 
-        self.method = method
-        self.url = url
-
+    def __init__(self, headers={}, body=None):
         self.headers = headers
         self.body = body
 
+        self._write_fn = None
+        self._close_fn = None
+
+    # streaming response data
+
+    def _set_streaming(self, write_fn, close_fn):
+        self._write_fn = write_fn
+        self._close_fn = close_fn
+
+    def write(self, data):
+        """Write data for a streaming response."""
+        if not self._write_fn:
+            raise Exception("not a streaming response")
+
+        if data:
+            self._write_fn(data)
+
+    def close(self):
+        """Close the streaming response"""
+        if not self._write_fn:
+            raise Exception("not a streaming response")
+
+        self._close_fn()
 
 class Request():
 
-    def __init__(self, message, fake_reply):
+    def __init__(self, method, url, message, fake_reply):
         self.message = message
+        self.method = method
+        self.url = url
         self.fake_reply = fake_reply
         self._streaming = False
+        self._parse_url()
 
-    def respond(self, message=None):
+    def _parse_url(self):
+        r = urlparse.urlparse(self.url)
+        self.url_scheme = r.scheme
+        self.url_netloc = r.netloc
+        self.url_path = r.path
+        self.url_params = r.params
+        self.url_query = r.query
+        self.url_query_dict = urlparse.parse_qs(r.query)
+        self.url_fragment = r.fragment
+
+    def respond(self, status=None, message=None, streaming=False):
         """Respond to this request with a Message.
 
-        Set the message body to None to write the response body later
-        by calling this method with a string as the message.
-
-        When message is None, a partial response is finally closed.
+        If streaming is True, initiate a streaming response. Stream
+        data using the passed messages .write(data) method and end the
+        request with .close().
         """
-        if isinstance(message, Message):
-            if message.body is None:
-                self._streaming = True
-            self.fake_reply.fake_response.emit(message)
-        elif message is None:
-            assert self._streaming, "not a streaming response"
-            self.fake_reply.fake_response_close.emit()
+        assert isinstance(message, Message)
+
+        status = status or 200
+        if isinstance(status, (int, long)):
+            status_text = HTTP_STATUS.get(status, 'unknown')
+        elif isinstance(status, (tuple, list)):
+            status, status_text = status
         else:
-            assert self._streaming, "not a streaming response"
-            self.fake_reply.fake_response_write.emit(str(message))
+            raise TypeError("status must be a number of tuple of (status, text), not: %r" % (status, ))
+
+        self.fake_reply.fake_response.emit(status, status_text, message)
+
+        if streaming:
+            message._set_streaming(write_fn=lambda data: self.fake_reply.fake_response_write.emit(str(data)),
+                                   close_fn=lambda: self.fake_reply.fake_response_close.emit())
+            message.write(message.body)
 
 
 class WebSocket():
@@ -164,6 +209,15 @@ class LocalDispatchNetworkAccessManager(QtNetwork.QNetworkAccessManager):
     Custom NetworkAccessManager to intercept requests and dispatch them locally.
     """
 
+    operation_strings = {
+        QtNetwork.QNetworkAccessManager.HeadOperation: 'HEAD',
+        QtNetwork.QNetworkAccessManager.GetOperation: 'GET',
+        QtNetwork.QNetworkAccessManager.PutOperation: 'PUT',
+        QtNetwork.QNetworkAccessManager.PostOperation: 'POST',
+        QtNetwork.QNetworkAccessManager.DeleteOperation: 'DELETE',
+        QtNetwork.QNetworkAccessManager.CustomOperation: None,
+    }
+
     def set_network_handler(self, network_handler):
         # overwriting the ctor with new arguments is not allowed -> use a setter instead
         self.network_handler = network_handler
@@ -171,13 +225,20 @@ class LocalDispatchNetworkAccessManager(QtNetwork.QNetworkAccessManager):
     def createRequest(self, operation, request, data):
         reply = None
 
-        method = "GET" # TODO: decode operation
-        url = request.url().toString()
+        # decode operation (== request method)
+        op_str = self.operation_strings[operation]
+        if op_str:
+            method = op_str
+        else:
+            # custom
+            method = str(request.attribute(QNetwork.QNetworkRequest.CustomVerbAttribute).toString())
+
+        url = str(request.url().toString())
         headers = dict((str(h),str(request.rawHeader(h))) for h in request.rawHeaderList())
 
-        msg   = Message(method=method, url=url, headers=headers, body=data)
+        msg   = Message(headers=headers, body=data)
         reply = FakeReply(self, request, operation)
-        self.network_handler.request(Request(msg, reply)) # will .set_response the FakeReply to reply
+        self.network_handler.request(Request(method=method, url=url, message=msg, fake_reply=reply)) # will .set_response the FakeReply to reply
         QtCore.QTimer.singleShot(0, lambda:self.finished.emit(reply))
         return reply
 
@@ -187,7 +248,7 @@ class FakeReply(QtNetwork.QNetworkReply):
     QNetworkReply implementation that returns a given response.
     """
 
-    fake_response       = QtCore.pyqtSignal(object)
+    fake_response       = QtCore.pyqtSignal(int, str, object)
     fake_response_write = QtCore.pyqtSignal(object)
     fake_response_close = QtCore.pyqtSignal()
 
@@ -207,13 +268,13 @@ class FakeReply(QtNetwork.QNetworkReply):
         self.setOperation(operation)
         self.open(self.ReadOnly | self.Unbuffered)
 
-    @QtCore.pyqtSlot(object)
-    def _fake_response(self, response):
+    @QtCore.pyqtSlot(int, str, object)
+    def _fake_response(self, status, status_text, response):
         assert isinstance(response, Message)
 
         # status
-        self.setAttribute(QtNetwork.QNetworkRequest.HttpStatusCodeAttribute, response.status)
-        self.setAttribute(QtNetwork.QNetworkRequest.HttpReasonPhraseAttribute, response.status_text)
+        self.setAttribute(QtNetwork.QNetworkRequest.HttpStatusCodeAttribute, status)
+        self.setAttribute(QtNetwork.QNetworkRequest.HttpReasonPhraseAttribute, status_text)
 
         # headers
         for k,v in response.headers.items():
