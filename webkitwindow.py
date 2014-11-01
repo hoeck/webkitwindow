@@ -124,12 +124,14 @@ class Request():
         else:
             raise TypeError("status must be a number of tuple of (status, text), not: %r" % (status, ))
 
-        self.fake_reply.fake_response.emit(status, status_text, message)
-
         if streaming:
+            self.fake_reply.fake_response.emit(status, status_text, message, True)
             message._set_streaming(write_fn=lambda data: self.fake_reply.fake_response_write.emit(str(data)),
                                    close_fn=lambda: self.fake_reply.fake_response_close.emit())
-            message.write(message.body)
+            if message.body is not None:
+                message.write(message.body)
+        else:
+            self.fake_reply.fake_response.emit(status, status_text, message, False)
 
     # response shortcuts
 
@@ -323,7 +325,7 @@ class FakeReply(QtNetwork.QNetworkReply):
     QNetworkReply implementation that returns a given response.
     """
 
-    fake_response       = QtCore.pyqtSignal(int, str, object)
+    fake_response       = QtCore.pyqtSignal(int, str, object, object)
     fake_response_write = QtCore.pyqtSignal(object)
     fake_response_close = QtCore.pyqtSignal()
 
@@ -343,8 +345,8 @@ class FakeReply(QtNetwork.QNetworkReply):
         self.setOperation(operation)
         self.open(self.ReadOnly | self.Unbuffered)
 
-    @QtCore.pyqtSlot(int, str, object)
-    def _fake_response(self, status, status_text, response):
+    @QtCore.pyqtSlot(int, str, object, object)
+    def _fake_response(self, status, status_text, response, streaming):
         assert isinstance(response, Message)
 
         # status
@@ -355,20 +357,21 @@ class FakeReply(QtNetwork.QNetworkReply):
         for k,v in response.headers.items():
             self.setRawHeader(QtCore.QByteArray(k), QtCore.QByteArray(v))
 
-        if response.body is not None:
+        if streaming:
+            # streaming response, call fake_response_write and fake_response_close
+            self._streaming = True
+            self._content = StringIO.StringIO()
+
+        else:
             self._content = response.body
             self._offset = 0
 
             # respond immediately
-            if not 'Content-Length' in response.headers:
+            if self._content and not 'Content-Length' in response.headers:
                 self.setHeader(QtNetwork.QNetworkRequest.ContentLengthHeader, QtCore.QVariant(len(self._content)))
 
             QtCore.QTimer.singleShot(0, lambda : self.readyRead.emit())
             QtCore.QTimer.singleShot(0, lambda : self.finished.emit())
-        else:
-            # streaming response, call fake_response_write and fake_response_close
-            self._streaming = True
-            self._content = StringIO.StringIO()
 
     @QtCore.pyqtSlot(object)
     def _fake_response_write(self, response):
