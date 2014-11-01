@@ -53,6 +53,17 @@ class Message():
 
         self._close_fn()
 
+def _parse_url(obj, url):
+    """Parse url and add the resulting parts as url_* attrs to obj."""
+    r = urlparse.urlparse(url)
+    obj.url_scheme = r.scheme
+    obj.url_netloc = r.netloc
+    obj.url_path = r.path
+    obj.url_params = r.params
+    obj.url_query = r.query
+    obj.url_query_dict = urlparse.parse_qs(r.query)
+    obj.url_fragment = r.fragment
+
 class Request():
 
     def __init__(self, method, url, message, fake_reply):
@@ -61,17 +72,7 @@ class Request():
         self.url = url
         self.fake_reply = fake_reply
         self._streaming = False
-        self._parse_url()
-
-    def _parse_url(self):
-        r = urlparse.urlparse(self.url)
-        self.url_scheme = r.scheme
-        self.url_netloc = r.netloc
-        self.url_path = r.path
-        self.url_params = r.params
-        self.url_query = r.query
-        self.url_query_dict = urlparse.parse_qs(r.query)
-        self.url_fragment = r.fragment
+        _parse_url(self, url)
 
     def respond(self, status=None, message=None, streaming=False):
         """Respond to this request with a Message.
@@ -106,6 +107,7 @@ class WebSocket():
         self.url = url
         self._backend = backend
         self._id = id
+        _parse_url(self, url)
 
     def connected(self):
         """Confirm a connection."""
@@ -353,7 +355,7 @@ class WebSocketBackend(QtCore.QObject):
     def connect(self, url):
         """Create a websocket connection."""
         id = max(self._connections.keys() or [0]) + 1
-        ws = WebSocket(url, self, id)
+        ws = WebSocket(str(url), self, id)
         self._connections[id] = ws
         QtCore.QTimer.singleShot(0, lambda: self._network_handler._connect.emit(ws))# ??????
         return id
