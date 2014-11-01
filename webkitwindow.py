@@ -397,7 +397,8 @@ class WebkitWindow(QtGui.QMainWindow):
         win = self(handler, url)
         win.show()
 
-        QtCore.QTimer.singleShot(0, lambda: handler.startup(win))
+        if getattr(handler, 'startup', None):
+            QtCore.QTimer.singleShot(0, lambda: handler.startup(win))
 
         if exit:
             sys.exit(app.exec_())
