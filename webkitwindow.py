@@ -275,7 +275,7 @@ class AsyncNetworkHandler(QtCore.QObject):
 
     @QtCore.pyqtSlot(object, str)
     def receive(self, websocket, data):
-        self._nh.receive(websocket, data)
+        self._nh.receive(websocket, str(data))
 
     @QtCore.pyqtSlot(object)
     def close(self, websocket):
