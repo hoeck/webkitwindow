@@ -4,6 +4,8 @@ import pkgutil
 import Queue
 import StringIO
 import urlparse
+import mimetypes
+import pkgutil
 
 try:
     from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
@@ -23,11 +25,37 @@ HTTP_STATUS = {
 
 class Message():
 
-    """An HTTP message."""
+    """An HTTP message.
+
+    headers must be a dict of {str: str/unicode}. (unicode gets
+    converted to an utf8 string)
+
+    body must be either None, str. When unicode, convert it to an utf8
+    string, else convert it to a str.
+    """
 
     def __init__(self, headers={}, body=None):
-        self.headers = headers
-        self.body = body
+        self.headers = {}
+        for k,v in headers.items():
+            assert isinstance(k, str), "header keys must be strings, not: %r" % (k, )
+
+            if isinstance(v, unicode):
+                v = v.decode('utf-8')
+            elif isinstance(v, str):
+                pass
+            else:
+                assert False, "header values must be strings or unicode, not: %r" % (v, )
+
+            self.headers[k] = v
+
+        if isinstance(body, unicode):
+            self.body = body.encode('utf-8')
+        elif isinstance(body, str):
+            self.body = body
+        elif body is None:
+            self.body = ""
+        else:
+            self.body = str(body)
 
         self._write_fn = None
         self._close_fn = None
@@ -64,6 +92,11 @@ def _parse_url(obj, url):
     obj.url_query_dict = urlparse.parse_qs(r.query)
     obj.url_fragment = r.fragment
 
+def guess_type(name, default="application/octet-stream"):
+    """Given a path to a file, guess its mimetype."""
+    guessed_type, encoding = mimetypes.guess_type(name, strict=False)
+    return guessed_type or default
+
 class Request():
 
     def __init__(self, method, url, message, fake_reply):
@@ -97,6 +130,46 @@ class Request():
             message._set_streaming(write_fn=lambda data: self.fake_reply.fake_response_write.emit(str(data)),
                                    close_fn=lambda: self.fake_reply.fake_response_close.emit())
             message.write(message.body)
+
+    # response shortcuts
+
+    def notfound(self, msg=""):
+        """Respond with '404 Not Found' and an optional message."""
+        self.respond((404, 'Not Found'), Message({'Content-Type': 'text/plain'}, msg))
+
+    def gone(self, msg=""):
+        """Respond with a '410 Gone' and an optional message."""
+        self.respond((404, 'Not Found'), Message({'Content-Type': 'text/plain'}, msg))
+
+    def redirect(self, url):
+        """Respond with a 302 Found to url."""
+        self.respond((302, 'Found'), Message({'Location': url}))
+
+    def found(self, body, content_type="text/plain"):
+        """Respond with a 200, data and content_type."""
+        self.respond((200, 'Found'), Message({"Content-Type": content_type}, body))
+
+    def found_resource(self, path, module_name, content_type=None, modify_fn=None):
+        """Respond with a 200 and a resource file loaded using pkgutil.get_data.
+
+        module_name and path are passed to pkgutil.get_data.
+        Optionally run modify_fn on the returned string (e.g. to fill a template).
+
+        Example to deliver a file from the webkitwindow.resources directory:
+
+            req.found_resource(path='/styles.css',
+                               module_name='webkitwindow.resources',
+                               modify_fn=lambda s: s.replace('TODAY', datetime.datetime.now()))
+        """
+        res_string = pkgutil.get_data(module_name, path)
+        if modify_fn:
+            res_string = modify_fn(res_string)
+        self.found(body=res_string, content_type=content_type or guess_type(path))
+
+    def found_file(self, path, content_type=None):
+        """Respond with a 200 and the file at path, optionally using content_type."""
+        with open(path) as f:
+            self.found(body=f.read(), content_type=content_type or guess_type(path))
 
 
 class WebSocket():
@@ -357,7 +430,7 @@ class WebSocketBackend(QtCore.QObject):
         id = max(self._connections.keys() or [0]) + 1
         ws = WebSocket(str(url), self, id)
         self._connections[id] = ws
-        QtCore.QTimer.singleShot(0, lambda: self._network_handler._connect.emit(ws))# ??????
+        QtCore.QTimer.singleShot(0, lambda: self._network_handler._connect.emit(ws)) #??????
         return id
 
     @QtCore.pyqtSlot(int)
