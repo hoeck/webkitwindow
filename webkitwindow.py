@@ -313,7 +313,8 @@ class LocalDispatchNetworkAccessManager(QtNetwork.QNetworkAccessManager):
         url = str(request.url().toString())
         headers = dict((str(h),str(request.rawHeader(h))) for h in request.rawHeaderList())
 
-        msg   = Message(headers=headers, body=data)
+        # data is a QIODevice or None
+        msg = Message(headers=headers, body=data and str(data.readAll()))
         reply = FakeReply(self, request, operation)
         self.network_handler.request(Request(method=method, url=url, message=msg, fake_reply=reply)) # will .set_response the FakeReply to reply
         QtCore.QTimer.singleShot(0, lambda:self.finished.emit(reply))
