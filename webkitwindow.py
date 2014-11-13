@@ -121,6 +121,8 @@ class Request():
             status_text = HTTP_STATUS.get(status, 'unknown')
         elif isinstance(status, (tuple, list)):
             status, status_text = status
+            status = int(status or 200)
+            status_text = str(status_text or 'unknown')
         else:
             raise TypeError("status must be a number of tuple of (status, text), not: %r" % (status, ))
 
