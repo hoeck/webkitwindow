@@ -124,7 +124,7 @@ class Request():
             status = int(status or 200)
             status_text = str(status_text or 'unknown')
         else:
-            raise TypeError("status must be a number of tuple of (status, text), not: %r" % (status, ))
+            raise TypeError("status must be a number or tuple of (status, text), not: %r" % (status, ))
 
         if streaming:
             self.fake_reply.fake_response.emit(status, status_text, message, True)
