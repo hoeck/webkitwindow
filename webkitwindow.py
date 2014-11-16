@@ -259,6 +259,7 @@ class AsyncNetworkHandler(QtCore.QObject):
     def __init__(self, network_handler):
         super(AsyncNetworkHandler, self).__init__()
         self._nh = network_handler
+        self._request.connect(self.request)
         self._connect.connect(self.connect)
         self._receive.connect(self.receive)
         self._close.connect(self.close)
@@ -318,7 +319,7 @@ class LocalDispatchNetworkAccessManager(QtNetwork.QNetworkAccessManager):
         # data is a QIODevice or None
         msg = Message(headers=headers, body=data and str(data.readAll()))
         reply = FakeReply(self, request, operation)
-        self.network_handler.request(Request(method=method, url=url, message=msg, fake_reply=reply)) # will .set_response the FakeReply to reply
+        self.network_handler._request.emit(Request(method=method, url=url, message=msg, fake_reply=reply)) # will .set_response the FakeReply to reply
         QtCore.QTimer.singleShot(0, lambda:self.finished.emit(reply))
         return reply
 
@@ -428,7 +429,7 @@ class WebSocketBackend(QtCore.QObject):
     def __init__(self, network_handler):
         super(WebSocketBackend, self).__init__()
         self._connections = {}
-        self._network_handler = AsyncNetworkHandler(network_handler)
+        self._network_handler = network_handler
 
     @QtCore.pyqtSlot(str, result=int)
     def connect(self, url):
@@ -467,7 +468,7 @@ class _WebkitWindow(QtGui.QMainWindow):
 
     def __init__(self, network_handler, url=None):
         self.url = url or "http://localhost"
-        self.network_handler = network_handler
+        self.network_handler = AsyncNetworkHandler(network_handler)
         QtGui.QMainWindow.__init__(self)
         self.setup()
 
