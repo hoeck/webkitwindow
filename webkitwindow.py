@@ -6,6 +6,7 @@ import StringIO
 import urlparse
 import mimetypes
 import pkgutil
+import itertools
 
 try:
     from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
@@ -470,12 +471,13 @@ class WebSocketBackend(QtCore.QObject):
     def __init__(self, network_handler):
         super(WebSocketBackend, self).__init__()
         self._connections = {}
+        self._ids = itertools.count()
         self._network_handler = network_handler
 
     @QtCore.pyqtSlot(str, result=int)
     def connect(self, url):
         """Create a websocket connection."""
-        id = max(self._connections.keys() or [0]) + 1
+        id = self._ids.next()
         ws = WebSocket(str(url), self, id)
         self._connections[id] = ws
         QtCore.QTimer.singleShot(0, lambda: self._network_handler._connect.emit(ws)) #??????
