@@ -538,11 +538,13 @@ class CustomQWebPage(QtWebKit.QWebPage):
 
     def javaScriptConsoleMessage(self, message, lineNumber, sourceID):
         if self._console_message == 'print':
-            print 'js-console: {} ({}:{})'.format(message, sourceID, lineNumber)
+            print u'js-console: {} ({}:{})'.format(unicode(message),
+                                                   unicode(sourceID),
+                                                   unicode(lineNumber)).encode('utf-8', 'ignore')
         elif self._console_message:
-            self._console_message({'message': str(message),
-                                   'line_number': str(lineNumber),
-                                   'source_id': str(sourceID)})
+            self._console_message({'message': unicode(message),
+                                   'line_number': unicode(lineNumber),
+                                   'source_id': unicode(sourceID)})
         else:
             pass
 
