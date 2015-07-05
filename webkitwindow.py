@@ -550,6 +550,7 @@ class CustomQWebPage(QtWebKit.QWebPage):
 class _WebkitWindow(QtGui.QMainWindow):
 
     _close_window = QtCore.pyqtSignal()
+    _set_zoom_factor = QtCore.pyqtSignal(float)
 
     def __init__(self, network_handler, url=None, console_message='print', no_focus_classname=None):
         self._console_message = console_message
@@ -558,6 +559,8 @@ class _WebkitWindow(QtGui.QMainWindow):
         self.no_focus_classname = no_focus_classname
         QtGui.QMainWindow.__init__(self)
         self.setup()
+
+        self._set_zoom_factor.connect(self.zoom_factor)
 
     def setup(self):
         centralwidget = QtGui.QWidget()
@@ -733,6 +736,15 @@ class _WebkitWindow(QtGui.QMainWindow):
         if self.no_focus_classname:
             qwebpage.microFocusChanged.connect(_steal_focus_from_frame)
 
+    @QtCore.pyqtSlot(float)
+    def zoom_factor(self, zf=None):
+        """Get or set the zoom factor for the embedded webview."""
+        if zf == None:
+            return self.webview.zoomFactor()
+        else:
+            assert isinstance(zf, float)
+            self.webview.setZoomFactor(zf)
+
 
 class WebkitWindow(object):
 
@@ -792,7 +804,7 @@ class WebkitWindow(object):
     def zoom_factor(self, zoom_factor=None):
         """Get or set the zoom factor."""
         if zoom_factor == None:
-            return self._window.webview.zoomFactor()
+            return self._window.zoom_factor()
         else:
             assert isinstance(zoom_factor, (int, long, float))
-            self.run_later(lambda: self._window.webview.setZoomFactor(float(zoom_factor)))
+            self._window._set_zoom_factor.emit(float(zoom_factor))
